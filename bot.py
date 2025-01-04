@@ -146,12 +146,12 @@ class BanEmbed:
 
             # Format fields
             embed.add_field(
-                name="Offenders Name:",
+                name="Player Name:",
                 value=player_name,
                 inline=True
             )
             embed.add_field(
-                name="Offenders SteamID:",
+                name="SteamID:",
                 value=steam_id,
                 inline=True
             )
@@ -159,7 +159,7 @@ class BanEmbed:
             # Add Steam Profile link if available
             steam_profile = f"https://steamcommunity.com/profiles/{steam_id}"
             embed.add_field(
-                name="Offenders Steam Profile:",
+                name="Steam Profile:",
                 value=f"[Click Here]({steam_profile})",
                 inline=False
             )
@@ -170,7 +170,7 @@ class BanEmbed:
                 if player_id:
                     battlemetrics_profile = f"https://www.battlemetrics.com/players/{player_id}"
                     embed.add_field(
-                        name="Offenders BattleMetrics Profile:",
+                        name="BattleMetrics Profile:",
                         value=f"[Click Here]({battlemetrics_profile})",
                         inline=False
                     )
@@ -241,7 +241,7 @@ class BanEmbed:
 
             # Add brief explanation
             embed.add_field(
-                name="Brief explanation of what happened:",
+                name="Notes from BM:",
                 value=attributes.get('note', 'No additional notes'),
                 inline=False
             )
