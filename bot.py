@@ -491,49 +491,29 @@ class BanView(View):
                 ) as response:
                     if response.status == 200:
                         data = await response.json()
-                        ban = data['data']
-                        attributes = ban.get('attributes', {})
                         
-                        # Update expiration field
-                        expires = attributes.get('expires')
-                        if expires:
-                            try:
-                                expire_dt = datetime.fromisoformat(expires.replace('Z', '+00:00'))
-                                expiry = expire_dt.strftime("%B %d, %Y %I:%M %p")
-                                relative = f"(in {(expire_dt - datetime.now(pytz.UTC)).days} days)"
-                                expires_text = f"{expiry}\n{relative}"
-                            except (ValueError, AttributeError):
-                                expires_text = "Invalid date"
-                        else:
-                            expires_text = "Permanent"
-                            
-                        # Update the fields
-                        for field in embed.fields:
-                            if field.name == "Expires:":
-                                embed.set_field_at(
-                                    embed.fields.index(field),
-                                    name="Expires:",
-                                    value=expires_text,
-                                    inline=True
-                                )
-                                break
+                        # Create new embed with refreshed data
+                        new_embed = BanEmbed.create_ban_embed(data['data'])
                         
-                        # Update the message with refreshed embed
-                        await interaction.message.edit(embed=embed)
+                        # Update the message with new embed
+                        await interaction.message.edit(embed=new_embed)
                         await interaction.response.send_message(
                             "✅ Ban information refreshed!",
                             ephemeral=True
                         )
                     else:
+                        error_msg = f"Failed to refresh ban information. Status code: {response.status}"
+                        if response.status == 404:
+                            error_msg = "This ban no longer exists or has been deleted."
                         await interaction.response.send_message(
-                            f"Failed to refresh ban information. Status code: {response.status}",
+                            error_msg,
                             ephemeral=True
                         )
                         
         except Exception as e:
-            logger.error(f"Error in refresh_callback: {e}")
+            logger.error(f"Error in refresh_callback: {e}", exc_info=True)
             await interaction.response.send_message(
-                f"Please Report this to Puvify: Error refreshing ban information - {str(e)}",
+                f"Error refreshing ban information: {str(e)}",
                 ephemeral=True
             )
 
@@ -610,19 +590,24 @@ class BanBot(discord.Client):
                 'Accept': 'application/json'
             }
             
+            params = {
+                'include': 'server,player,banList,user',
+                'sort': '-timestamp',
+                'filter[expired]': 'false',
+                'filter[organization]': BATTLEMETRICS_ORG_ID,
+                'filter[banList]': BATTLEMETRICS_BANLIST_ID,
+                'page[size]': 1
+            }
+            
+            # Add debug logging for request
+            logger.info(f"Making BattleMetrics API request with params: {params}")
+            
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     'https://api.battlemetrics.com/bans',
                     headers=headers,
-                    params={
-                        'include': 'server,player,banList,user',
-                        'sort': '-timestamp',
-                        'filter[expired]': 'false',
-                        'filter[organization]': BATTLEMETRICS_ORG_ID,
-                        'filter[banList]': BATTLEMETRICS_BANLIST_ID,
-                        'page[size]': 1
-                    },
-                    timeout=aiohttp.ClientTimeout(total=10)  # 10 second timeout
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=10)
                 ) as response:
                     if response.status == 200:
                         data = await response.json()
@@ -687,12 +672,14 @@ class BanBot(discord.Client):
                                     logger.info(f"New ban processed: {ban.get('id')}")
                             
                     else:
-                        logger.error(f"BattleMetrics API error: {response.status}")
+                        response_text = await response.text()
+                        logger.error(f"BattleMetrics API error {response.status}: {response_text}")
                         
+        except aiohttp.ClientError as e:
+            logger.error(f"Network error in check_bans: {str(e)}")
         except Exception as e:
-            logger.error(f"Ban check error: {e}")
+            logger.error(f"Ban check error: {str(e)}", exc_info=True)
         finally:
-            # Ensure we don't spam the API on errors
             await asyncio.sleep(5)
 
     @check_bans.before_loop
@@ -744,16 +731,20 @@ def main():
                 logger.critical(f"Missing required environment variable: {var_name}")
                 sys.exit(1)
 
-        # Validate API key
+        # Validate API key and banlist
         try:
             response = requests.get(
-                'https://api.battlemetrics.com/bans',
+                f'https://api.battlemetrics.com/bans',
                 headers={'Authorization': f'Bearer {BATTLEMETRICS_API_KEY}'},
-                params={'page[size]': 1}
+                params={
+                    'filter[banList]': BATTLEMETRICS_BANLIST_ID,
+                    'page[size]': 1
+                }
             )
 
             if response.status_code != 200:
-                logger.critical(f"Invalid BattleMetrics API key (Status code: {response.status_code})")
+                logger.critical(f"Invalid BattleMetrics API key or banlist ID (Status code: {response.status_code})")
+                logger.critical(f"Response: {response.text}")
                 sys.exit(1)
 
             data = response.json()
@@ -761,10 +752,10 @@ def main():
                 logger.critical("API response missing 'data' field")
                 sys.exit(1)
                 
-            logger.info("BattleMetrics API key validated successfully")
+            logger.info("BattleMetrics API key and banlist ID validated successfully")
             
         except Exception as e:
-            logger.critical(f"Failed to validate BattleMetrics API key: {str(e)}")
+            logger.critical(f"Failed to validate BattleMetrics API configuration: {str(e)}")
             sys.exit(1)
 
         # Initialize and run bot
